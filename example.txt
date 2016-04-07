@@ -1,0 +1,4 @@
+let x = (10 + 3) * (2 - 4) / 2
+write x
+let y = x * 20
+write y
