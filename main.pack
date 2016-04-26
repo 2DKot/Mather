@@ -1,6 +1,7 @@
 ﻿#include @"main.ph"
 
 % privately used packages
+#include @"pfc\boolean\boolean.ph"
 #include @"pfc\fileSystem\fileSystem.ph"
 #include @"pfc\list\list.ph"
 #include @"pfc\string\string.ph"

@@ -14,12 +14,14 @@ implement main
 
 domains
   token = val(value); op(operator); com(command); name(string).
-  value = number(integer).
-  operator = lbracket; rbracket; mult; divi; plus; minus.
-  command = write; let; equal. %РАЗБЕЙ НА РАЗНЫЕ ДОМЕНЫ
+  value = number(integer); bool(boolean).
+  operator = lbracket; rbracket; mult; divi; plus; minus; equal; greater; less; l_or; l_and.
+  command =  write; let. %РАЗБЕЙ НА РАЗНЫЕ ДОМЕНЫ
   line = let(string Name, expression); write(expression).
   expression = token*.
 class predicates
+  toB:(predicate_dt{})->value.
+
   scanner:(string) -> token*.
   makeToken:(string) -> token.
   getLines:(token* Input) -> line*.
@@ -27,6 +29,7 @@ class predicates
   toReversePolish:(token* Input, token* Stack, token* OutputAcc) -> token*.
   priority:(operator) -> integer.
   exeFunc:(line*).
+  writeValue:(value).
   calculate:(token*, value* Stack) -> value.
   operation:(operator, value*) -> value.
   arity:(operator) -> integer.
@@ -35,6 +38,9 @@ class facts
   var:(string Name, value).
 
 clauses
+  toB(P) = bool(true) :- P(), !.
+  toB(_) = bool(false).
+
   % СОСТАВЛЯЕМ СПИСОК ТОКЕНОВ
   scanner(S) = [makeToken(Tok)|scanner(Rest)]:- frontToken(S, Tok, Rest), !.
   scanner(_) = [].
@@ -45,17 +51,23 @@ clauses
   makeToken("/") = op(divi) :- !.
   makeToken("+") = op(plus) :- !.
   makeToken("-") = op(minus) :- !.
-  makeToken("=") = com(equal) :- !.
+  makeToken("=") = op(equal) :- !.
+  makeToken(">") = op(greater) :- !.
+  makeToken("<") = op(less) :- !.
+  makeToken("|") = op(l_or) :- !.
+  makeToken("&") = op(l_and) :- !.
   makeToken("write") = com(write) :- !.
-  makeToken("let") = com(let) :- !.
+  makeToken(":") = com(let) :- !.
+  makeToken("true") = val(bool(true)) :- !.
+  makeToken("false") = val(bool(false)) :- !.
   makeToken(S) = val(number(Num)) :- Num = tryToTerm(S), !.
   makeToken(S) = name(S) :- isName(S), !.
   makeToken(S) = _ :- exception::raise_user(write("Неизвестный токен ", S)).
 
   %ПОЛУЧАЕМ СТРОКИ ФУНКЦИИ В УДОБНОЙ ФОРМЕ
   getLines(Tokens) = [let(Name, Expression)|getLines(Rest)] :-
-    split(3, Tokens, Left, Right),
-    Left = [com(let), name(Name), com(equal)],
+    split(2, Tokens, Left, Right),
+    Left = [name(Name), com(let)],
     getExpression(Right, [], Expression, Rest), !.
   getLines(Tokens) = [write(Expression)|getLines(Rest)] :-
     split(1, Tokens, Left, Right),
@@ -68,7 +80,7 @@ clauses
   %считываем токены, пока не наткнёмся на начало новой строки. Тогда преобразуем накопленное в ПОЛИЗ
   getExpression([], Expr, toReversePolish(reverse(Expr), [],[]), []) :- !.
   getExpression(Tokens, Expr, toReversePolish(reverse(Expr),[],[]), Tokens) :-
-    (Tokens = [com(let)|_], !; Tokens = [com(write)|_]),
+    (Tokens = [name(_)|[com(let)|_]], !; Tokens = [com(write)|_]),
     write("Было:", Expr), nl, write("Стало:", toReversePolish(reverse(Expr), [],[])), nl, !.
   getExpression([T|Tokens], ExprAcc, Expression, Rest) :-
     getExpression(Tokens, [T|ExprAcc], Expression, Rest).
@@ -101,31 +113,39 @@ clauses
 
   priority(lbracket) = 0 :- !.
   priority(rbracket) = 1 :- !.
-  priority(plus) = 2 :- !.
-  priority(minus) = 2 :- !.
-  priority(mult) = 3 :- !.
-  priority(divi) = 3 :- !.
+  priority(l_or) = 2 :- !.
+  priority(l_and) = 3 :- !.
+  priority(equal) = 4 :- !.
+  priority(less) = 4 :- !.
+  priority(greater) = 4 :- !.
+  priority(plus) = 5 :- !.
+  priority(minus) = 5 :- !.
+  priority(mult) = 6 :- !.
+  priority(divi) = 6 :- !.
 
   %ВЫПОЛНЯЕМ ФУНКЦИЮ (список строк)
   exeFunc([let(Name, Expression) | Lines]) :-
     assert(var(Name, calculate(Expression, []))), exeFunc(Lines), !.
   exeFunc([write(Expression) | Lines]) :-
     Res = calculate(Expression, []),
-    Res = number(V),
-    write(V), nl, exeFunc(Lines), !.
+    writeValue(Res),
+    exeFunc(Lines), !.
   exeFunc([]).
+
+  writeValue(number(V)) :- write(V), nl, !.
+  writeValue(bool(V)) :- write(V), nl, !.
 
   %ВЫЧИСЛИТЕЛЬ
   %просто число ложим на стек
-  calculate([val(number(X))|Tokens], Stack) = calculate(Tokens, [number(X)|Stack]) :- !.
+  calculate([val(V)|Tokens], Stack) = calculate(Tokens, [V|Stack]) :- !.
   %из переменной извлекаем число
   calculate([name(Name)|Tokens], Stack) =
-    calculate(Tokens, [number(X)|Stack]) :- var(Name, number(X)), !.
+    calculate(Tokens, [V|Stack]) :- var(Name, V), !.
   calculate([op(Op)|Tokens], Stack) =
     calculate(Tokens, [operation(Op, Operands)|RestStack]) :-
     N = arity(Op), split(N, Stack, Operands, RestStack), !.
   calculate([T|_], _) = _ :- exception::raise_user(write("Неожиданный токен ", T, "!")).
-  calculate([], [number(Result)]) = number(Result) :- !.
+  calculate([], [V]) = V :- !.
   calculate([], _) = _ :-
     exception::raise_user("Операндов больше, чем требуют операторы выражения!").
 
@@ -133,6 +153,11 @@ clauses
   operation(minus, [number(A), number(B)]) = number(B-A) :- !.
   operation(mult, [number(A), number(B)]) = number(B*A) :- !.
   operation(divi, [number(A), number(B)]) = number(B div A) :- !.
+  operation(equal, [number(A), number(B)]) = toB({:-B=A}) :- !.
+  operation(greater, [number(A), number(B)]) = toB({:-B>A}) :- !.
+  operation(less, [number(A), number(B)]) = toB({:-B<A}) :- !.
+  operation(l_or, [bool(A), bool(B)]) = bool(boolean::logicalOr(B,A)) :- !.
+  operation(l_and, [bool(A), bool(B)]) = bool(boolean::logicalAnd(B,A)) :- !.
   operation(Op,Vals) = _ :-
     exception::raise_user(write(
       "Неверное использование операции. Операция: ", Op, " Параметры: ", Vals)).
@@ -141,6 +166,11 @@ clauses
   arity(minus) = 2 :- !.
   arity(mult) = 2 :- !.
   arity(divi) = 2 :- !.
+  arity(equal) = 2 :-!.
+  arity(greater) = 2 :- !.
+  arity(less) = 2 :- !.
+  arity(l_or) = 2 :- !.
+  arity(l_and) = 2 :- !.
   arity(Op) = _ :- exception::raise_user(write("Неверное использование оператора ", Op, ".")).
 
   run() :-

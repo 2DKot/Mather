@@ -1,4 +1,18 @@
-let x = (10 + 3) * (2 - 4) / 2
+x: (10 + 3) * (2 - 4) / 2
 write x
-let y = x * 20
-write y
+y: x * 20
+write y + 7
+
+z: 1 = 2
+write x
+write true & true
+write false & true
+write false & false
+write true | true
+write false | true
+write false | false
+
+write x > y | x = y
+
+write (false | true) & true
+write false | false & true
