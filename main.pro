@@ -13,29 +13,37 @@ implement main
   open core, console, string, list
 
 domains
-  token = val(value); op(operator); com(command); name(string).
+  token = val(value); op(operator); com(command); name(string); fun; comma.
   value = number(integer); bool(boolean).
-  operator = lbracket; rbracket; mult; divi; plus; minus; equal; greater; less; l_or; l_and.
-  command =  write; let. %РАЗБЕЙ НА РАЗНЫЕ ДОМЕНЫ
-  line = let(string Name, expression); write(expression).
+  operator = lbracket; rbracket; mult; divi; plus; minus;
+              equal; greater; less; l_or; l_and; func(string).
+  command =  write; let; return. %РАЗБЕЙ НА РАЗНЫЕ ДОМЕНЫ
+  line = let(string Name, expression); write(expression); return(expression).
   expression = token*.
 class predicates
   toB:(predicate_dt{})->value.
 
   scanner:(string) -> token*.
   makeToken:(string) -> token.
+  correctFunCalls:(token*, token*) -> token*.
+  correctParams:(token*, token*) -> token*.
+  getCallParams:(token*, token*, token*[out], token*[out], integer).
+  declareFuns:(token*).
+  getFunParams:(token*, string*, string* [out], token* [out]).
+  getFunTokens:(token*, token*) -> token* nondeterm.
   getLines:(token* Input) -> line*.
   getExpression:(token* Input, token* ExprAcc, token* Expr [out], token* Rest [out]).
   toReversePolish:(token* Input, token* Stack, token* OutputAcc) -> token*.
   priority:(operator) -> integer.
-  exeFunc:(line*).
+  exeFunc:(line*, string FunName) -> value.
   writeValue:(value).
-  calculate:(token*, value* Stack) -> value.
+  calculate:(token*, value* Stack, string FunName) -> value.
   operation:(operator, value*) -> value.
   arity:(operator) -> integer.
 
 class facts
-  var:(string Name, value).
+  var:(string Name, value, string FunName).
+  fun:(string Name, line*, string* Params).
 
 clauses
   toB(P) = bool(true) :- P(), !.
@@ -56,22 +64,81 @@ clauses
   makeToken("<") = op(less) :- !.
   makeToken("|") = op(l_or) :- !.
   makeToken("&") = op(l_and) :- !.
+  makeToken(",") = comma :- !.
   makeToken("write") = com(write) :- !.
   makeToken(":") = com(let) :- !.
+  makeToken("return") = com(return) :- !.
   makeToken("true") = val(bool(true)) :- !.
   makeToken("false") = val(bool(false)) :- !.
+  makeToken("fun") = fun :- !.
   makeToken(S) = val(number(Num)) :- Num = tryToTerm(S), !.
   makeToken(S) = name(S) :- isName(S), !.
   makeToken(S) = _ :- exception::raise_user(write("Неизвестный токен ", S)).
 
+  correctFunCalls([], NewTokens) = reverse(NewTokens) :- !.
+  correctFunCalls(RawTokens, NewTokens) =
+    correctFunCalls(append(CorrectedParams,Rest), append(NewCall,NewTokens))
+    :- % встретили вызов функции
+    split(2, RawTokens, Left, Right),
+    Left = [name(Name), op(lbracket)],
+    getCallParams(Right, [], Params, Rest, 1),
+    CorrectedParams = append(correctParams(Params, []),[op(rbracket)]),
+    %nl,write("CorrectedParams: ", CorrectedParams), nl,
+    NewCall = reverse([op(lbracket), op(func((Name))), op(lbracket)]),
+    !.
+  correctFunCalls([Tok|RawTokens], NewTokens) = correctFunCalls(RawTokens, [Tok|NewTokens]).
+
+  correctParams([], NewTokens) = NewTokens :- !.
+  correctParams([comma|Tokens], NewTokens) =
+    correctParams(Tokens, [op(rbracket)|[op(lbracket)|NewTokens]]):- !.
+  correctParams([Tok|Tokens], NewTokens) =
+    correctParams(Tokens, [Tok|NewTokens]) :- !.
+
+  getCallParams(Tokens, ParamsAcc, ParamsAcc, Tokens, 0) :- !.
+  getCallParams([op(lbracket)|Tokens], ParamsAcc, Params, Rest, Balance) :-
+    getCallParams(Tokens, [op(lbracket)|ParamsAcc], Params, Rest, Balance+1), !.
+  getCallParams([op(rbracket)|Tokens], ParamsAcc, Params, Rest, Balance) :-
+    getCallParams(Tokens, [op(rbracket)|ParamsAcc], Params, Rest, Balance-1), !.
+  getCallParams([Tok|Tokens], ParamsAcc, Params, Rest, Balance) :-
+    getCallParams(Tokens, [Tok|ParamsAcc], Params, Rest, Balance), !.
+  getCallParams([], _, _, _, _) :-
+    exception::raise_user("Неверная расстановка скобок в вызове функции!").
+
+  declareFuns(RawTokens) :-
+    write("Объявлены функции:"), nl,
+    FunAllTokens = getFunTokens(list::drop(1,RawTokens), []),
+    getFunParams(FunAllTokens, [], NP, Tokens),
+    [Name | Params] = NP,
+    Lines = getLines(Tokens),
+    assert(fun(Name, Lines, Params)),
+    write(Name, " ", Params), nl,
+    fail; succeed.
+
+  getFunParams([com(let) | Tokens], AccParams, reverse(AccParams), Tokens) :- !.
+  getFunParams([name(Name) | Tokens], AccParams, Params, Rest) :-
+    getFunParams(Tokens, [Name|AccParams], Params, Rest), !.
+  getFunParams([Tok|_], _, _, _) :-
+    exception::raise_user(write("Ожидалось имя параметра функции, а получено", Tok)).
+  getFunParams([], _, _, _) :-
+    exception::raise_user("Функция внезапно оборвалась!").
+
+  getFunTokens([], Acc) = reverse(Acc) :- !.
+  getFunTokens([fun|_], Acc) = reverse(Acc).
+  getFunTokens([fun|Tokens], _) = getFunTokens(Tokens, []) :- !.
+  getFunTokens([Tok|Tokens], Acc) = getFunTokens(Tokens, [Tok|Acc]) :- !.
+
   %ПОЛУЧАЕМ СТРОКИ ФУНКЦИИ В УДОБНОЙ ФОРМЕ
-  getLines(Tokens) = [let(Name, Expression)|getLines(Rest)] :-
+  getLines(Tokens) = [let(Name, Expression)|getLines(Rest)] :- %переменная
     split(2, Tokens, Left, Right),
     Left = [name(Name), com(let)],
     getExpression(Right, [], Expression, Rest), !.
-  getLines(Tokens) = [write(Expression)|getLines(Rest)] :-
+  getLines(Tokens) = [write(Expression)|getLines(Rest)] :- %вывод на экран
     split(1, Tokens, Left, Right),
     Left = [com(write)],
+    getExpression(Right, [], Expression, Rest), !.
+  getLines(Tokens) = [return(Expression)|getLines(Rest)] :- %возврат значения
+    split(1, Tokens, Left, Right),
+    Left = [com(return)],
     getExpression(Right, [], Expression, Rest), !.
   getLines([]) = [] :- !.
   getLines(Tokens) = _ :-
@@ -80,8 +147,9 @@ clauses
   %считываем токены, пока не наткнёмся на начало новой строки. Тогда преобразуем накопленное в ПОЛИЗ
   getExpression([], Expr, toReversePolish(reverse(Expr), [],[]), []) :- !.
   getExpression(Tokens, Expr, toReversePolish(reverse(Expr),[],[]), Tokens) :-
-    (Tokens = [name(_)|[com(let)|_]], !; Tokens = [com(write)|_]),
-    write("Было:", Expr), nl, write("Стало:", toReversePolish(reverse(Expr), [],[])), nl, !.
+    (Tokens = [name(_)|[com(let)|_]], !; Tokens = [com(_)|_]),
+    %write("Было:", Expr), nl, write("Стало:", toReversePolish(reverse(Expr), [],[])), nl,
+    !.
   getExpression([T|Tokens], ExprAcc, Expression, Rest) :-
     getExpression(Tokens, [T|ExprAcc], Expression, Rest).
 
@@ -122,31 +190,32 @@ clauses
   priority(minus) = 5 :- !.
   priority(mult) = 6 :- !.
   priority(divi) = 6 :- !.
+  priority(func(_)) = 10 :- !.
 
   %ВЫПОЛНЯЕМ ФУНКЦИЮ (список строк)
-  exeFunc([let(Name, Expression) | Lines]) :-
-    assert(var(Name, calculate(Expression, []))), exeFunc(Lines), !.
-  exeFunc([write(Expression) | Lines]) :-
-    Res = calculate(Expression, []),
-    writeValue(Res),
-    exeFunc(Lines), !.
-  exeFunc([]).
+  exeFunc([let(Name, Expression) | Lines], FunName) = exeFunc(Lines, FunName) :-
+    assert(var(Name, calculate(Expression, [], FunName), FunName)), !.
+  exeFunc([write(Expression) | Lines], FunName) = exeFunc(Lines, FunName) :-
+    Res = calculate(Expression, [], FunName),
+    writeValue(Res), !.
+  exeFunc([return(Expression) | _], FunName) = calculate(Expression, [], FunName) :- !.
+  exeFunc([], _) = _ :- exception::raise_user("Функция должна возвращать значение!").
 
   writeValue(number(V)) :- write(V), nl, !.
   writeValue(bool(V)) :- write(V), nl, !.
 
   %ВЫЧИСЛИТЕЛЬ
   %просто число ложим на стек
-  calculate([val(V)|Tokens], Stack) = calculate(Tokens, [V|Stack]) :- !.
+  calculate([val(V)|Tokens], Stack, FunName) = calculate(Tokens, [V|Stack], FunName) :- !.
   %из переменной извлекаем число
-  calculate([name(Name)|Tokens], Stack) =
-    calculate(Tokens, [V|Stack]) :- var(Name, V), !.
-  calculate([op(Op)|Tokens], Stack) =
-    calculate(Tokens, [operation(Op, Operands)|RestStack]) :-
+  calculate([name(Name)|Tokens], Stack, FunName) =
+    calculate(Tokens, [V|Stack], FunName) :- var(Name, V, FunName), !.
+  calculate([op(Op)|Tokens], Stack, FunName) =
+    calculate(Tokens, [operation(Op, Operands)|RestStack], FunName) :-
     N = arity(Op), split(N, Stack, Operands, RestStack), !.
-  calculate([T|_], _) = _ :- exception::raise_user(write("Неожиданный токен ", T, "!")).
-  calculate([], [V]) = V :- !.
-  calculate([], _) = _ :-
+  calculate([T|_], _, _) = _ :- exception::raise_user(write("Неожиданный токен ", T, "!")).
+  calculate([], [V], _) = V :- !.
+  calculate([], _, _) = _ :-
     exception::raise_user("Операндов больше, чем требуют операторы выражения!").
 
   operation(plus, [number(A), number(B)]) = number(B+A) :- !.
@@ -158,6 +227,11 @@ clauses
   operation(less, [number(A), number(B)]) = toB({:-B<A}) :- !.
   operation(l_or, [bool(A), bool(B)]) = bool(boolean::logicalOr(B,A)) :- !.
   operation(l_and, [bool(A), bool(B)]) = bool(boolean::logicalAnd(B,A)) :- !.
+  operation(func(FunName),Values) = exeFunc(Lines, FunName) :-
+    fun(FunName, Lines, Params),
+    Tuples = zip(Params, Values),
+    forAll(Tuples,{(tuple(ParamName, Val)) :- assert(var(ParamName, Val, FunName))}),
+    !.
   operation(Op,Vals) = _ :-
     exception::raise_user(write(
       "Неверное использование операции. Операция: ", Op, " Параметры: ", Vals)).
@@ -171,16 +245,20 @@ clauses
   arity(less) = 2 :- !.
   arity(l_or) = 2 :- !.
   arity(l_and) = 2 :- !.
+  arity(func(Name)) = list::length(Params) :- fun(Name, _, Params), !.
   arity(Op) = _ :- exception::raise_user(write("Неверное использование оператора ", Op, ".")).
 
   run() :-
     Source = file::readString("program.txt"),
     RawTokens = scanner(Source),
-    write(RawTokens), nl,
-    Lines = getLines(RawTokens),
-    write("Строки: "), nl,
-    write(Lines), nl,
-    exeFunc(Lines),
+    %write(RawTokens), nl,
+    CorrectedTokens = correctFunCalls(RawTokens, []),
+    %write("Исправленные вызовы: \n", CorrectedTokens),
+    declareFuns(CorrectedTokens),
+    (fun("main", Lines, _), !; exception::raise_user("Отсутствует функция main!")),
+    write("Начинаем выполнение программы."), nl,
+    Code = exeFunc(Lines, "main"),
+    write("Программа завершилась с кодом ", Code), nl,
     succeed. % place your own code here
 
 end implement main

@@ -1,18 +1,26 @@
-x: (10 + 3) * (2 - 4) / 2
-write x
-y: x * 20
-write y + 7
+fun main:
+  x: (10 + 3) * (2 - 4) / 2
+  write x
+  y: x * 20
+  write y + 7
 
-z: 1 = 2
-write x
-write true & true
-write false & true
-write false & false
-write true | true
-write false | true
-write false | false
+  z: 1 = 2
+  write x
+  write true & true
+  write false & true
+  write false & false
+  write true | true
+  write false | true
+  write false | false
 
-write x > y | x = y
+  write x > y | x = y
 
-write (false | true) & true
-write false | false & true
+  write (false | true) & true
+  write false | false & true
+
+  write myFunction(5, 2+3) * 10
+  return 0
+
+fun myFunction a b:
+  write b
+  return 10 + a
