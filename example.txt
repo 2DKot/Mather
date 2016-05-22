@@ -19,8 +19,18 @@ fun main:
   write false | false & true
 
   write myFunction(5, 2+3) * 10
+
+  write max(5, 7)
+  write max(8, 4)
   return 0
 
 fun myFunction a b:
   write b
   return 10 + a
+
+fun max a b:
+  if a > b
+    return a
+  else
+    return b
+  endif

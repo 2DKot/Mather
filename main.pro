@@ -13,12 +13,14 @@ implement main
   open core, console, string, list
 
 domains
-  token = val(value); op(operator); com(command); name(string); fun; comma.
+  token = val(value); op(operator); com(command); name(string); fun; comma;
+          rawIf; rawElse; rawEndif.
   value = number(integer); bool(boolean).
   operator = lbracket; rbracket; mult; divi; plus; minus;
               equal; greater; less; l_or; l_and; func(string).
-  command =  write; let; return. %РАЗБЕЙ НА РАЗНЫЕ ДОМЕНЫ
-  line = let(string Name, expression); write(expression); return(expression).
+  command =  write; let; return; ifGoto(integer); goto(integer); label(integer). %РАЗБЕЙ НА РАЗНЫЕ ДОМЕНЫ
+  line = let(string Name, expression); write(expression); return(expression);
+          ifGoto(expression, integer); goto(integer); label(integer).
   expression = token*.
 class predicates
   toB:(predicate_dt{})->value.
@@ -28,6 +30,7 @@ class predicates
   correctFunCalls:(token*, token*) -> token*.
   correctParams:(token*, token*) -> token*.
   getCallParams:(token*, token*, token*[out], token*[out], integer).
+  correctIfs:(token*, token*, integer, integer*) -> token*.
   declareFuns:(token*).
   getFunParams:(token*, string*, string* [out], token* [out]).
   getFunTokens:(token*, token*) -> token* nondeterm.
@@ -36,6 +39,7 @@ class predicates
   toReversePolish:(token* Input, token* Stack, token* OutputAcc) -> token*.
   priority:(operator) -> integer.
   exeFunc:(line*, string FunName) -> value.
+  skipToLabel:(line*, integer) -> line*.
   writeValue:(value).
   calculate:(token*, value* Stack, string FunName) -> value.
   operation:(operator, value*) -> value.
@@ -68,6 +72,9 @@ clauses
   makeToken("write") = com(write) :- !.
   makeToken(":") = com(let) :- !.
   makeToken("return") = com(return) :- !.
+  makeToken("if") = rawIf :- !.
+  makeToken("else") = rawElse :- !.
+  makeToken("endif") = rawEndif :- !.
   makeToken("true") = val(bool(true)) :- !.
   makeToken("false") = val(bool(false)) :- !.
   makeToken("fun") = fun :- !.
@@ -103,6 +110,19 @@ clauses
     getCallParams(Tokens, [Tok|ParamsAcc], Params, Rest, Balance), !.
   getCallParams([], _, _, _, _) :-
     exception::raise_user("Неверная расстановка скобок в вызове функции!").
+
+  correctIfs([], NewTokens, _, _) = reverse(NewTokens) :- !.
+  correctIfs([rawIf|Tokens], NewTokens, MaxLabel, Stack) =
+    correctIfs(Tokens, [com(ifGoto(MaxLabel))|NewTokens], MaxLabel+1, [MaxLabel|Stack]) :- !.
+  correctIfs([rawElse|Tokens], NewTokens, MaxLabel, [Top|Stack]) =
+    correctIfs(Tokens,
+      append([com(label(Top))], [com(goto(MaxLabel))], NewTokens),
+      MaxLabel+1,
+      [MaxLabel|Stack]) :- !.
+  correctIfs([rawEndif|Tokens], NewTokens, MaxLabel, [Top|Stack]) =
+    correctIfs(Tokens, [com(label(Top))|NewTokens], MaxLabel, Stack) :- !.
+  correctIfs([Tok|Tokens], NewTokens, MaxLabel, Stack) =
+    correctIfs(Tokens, [Tok|NewTokens], MaxLabel, Stack) :- !.
 
   declareFuns(RawTokens) :-
     write("Объявлены функции:"), nl,
@@ -140,6 +160,12 @@ clauses
     split(1, Tokens, Left, Right),
     Left = [com(return)],
     getExpression(Right, [], Expression, Rest), !.
+  getLines(Tokens) = [ifGoto(Expression, LabelNumber)|getLines(Rest)] :- %if
+    split(1, Tokens, Left, Right),
+    Left = [com(ifGoto(LabelNumber))],
+    getExpression(Right, [], Expression, Rest), !.
+  getLines([com(goto(I))|Tokens]) = [goto(I)|getLines(Tokens)] :- !.%goto
+  getLines([com(label(I))|Tokens]) = [label(I)|getLines(Tokens)] :- !.%label
   getLines([]) = [] :- !.
   getLines(Tokens) = _ :-
     exception::raise_user(write("Неожиданный участок программы:", Tokens)).
@@ -198,8 +224,35 @@ clauses
   exeFunc([write(Expression) | Lines], FunName) = exeFunc(Lines, FunName) :-
     Res = calculate(Expression, [], FunName),
     writeValue(Res), !.
-  exeFunc([return(Expression) | _], FunName) = calculate(Expression, [], FunName) :- !.
+  exeFunc([return(Expression) | _], FunName) = Result :-
+    Result = calculate(Expression, [], FunName),
+    (
+      fun(FunName, _, Params), !;
+      exception::raise_user("Функция была удаления во время её исполнения. Ты добился невозможного!")
+    ),
+    forAll(Params, {(Param) :- retract(var(Param,_,FunName)), !;
+      exception::raise_user(write("Ошибка удаления переменной ", Param,
+        " при выходе из контекста ", FunName))}),
+    !.
+  exeFunc([ifGoto(Expression, LabelNumber) | Lines], FunName) = exeFunc(Rest, FunName) :-
+    Res = calculate(Expression, [], FunName),
+    (
+      Res = bool(false),
+      Rest = skipToLabel(Lines, LabelNumber), !;
+      Res = bool(true),
+      Rest = Lines, !;
+      exception::raise_user(write("В if ожидалось булевое значение. Получено ", Res, "."))
+    ), !.
+  exeFunc([goto(LabelNumber) | Lines], FunName) = exeFunc(Rest, FunName) :-
+    Rest = skipToLabel(Lines, LabelNumber), !.
+  exeFunc([label(_) | Lines], FunName) = exeFunc(Lines, FunName) :- !.
   exeFunc([], _) = _ :- exception::raise_user("Функция должна возвращать значение!").
+
+  skipToLabel([label(LabelNumber)|Lines], LabelNumber) = Lines :- !.
+  skipToLabel([_|Lines], LabelNumber) = skipToLabel(Lines, LabelNumber) :- !.
+  skipToLabel([], LabelNumber) = _ :-
+    exception::raise_user(write("Программа оборвалась до того, как появилась метка ", LabelNumber,
+      ". Забыли endif?")).
 
   writeValue(number(V)) :- write(V), nl, !.
   writeValue(bool(V)) :- write(V), nl, !.
@@ -252,9 +305,11 @@ clauses
     Source = file::readString("program.txt"),
     RawTokens = scanner(Source),
     %write(RawTokens), nl,
-    CorrectedTokens = correctFunCalls(RawTokens, []),
+    CorrectedCalls = correctFunCalls(RawTokens, []),
     %write("Исправленные вызовы: \n", CorrectedTokens),
-    declareFuns(CorrectedTokens),
+    CorrectedIfs = correctIfs(CorrectedCalls, [], 0, []),
+    %write("Исправленные ифы: \n", CorrectedIfs),
+    declareFuns(CorrectedIfs),
     (fun("main", Lines, _), !; exception::raise_user("Отсутствует функция main!")),
     write("Начинаем выполнение программы."), nl,
     Code = exeFunc(Lines, "main"),
