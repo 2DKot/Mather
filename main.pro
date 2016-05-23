@@ -18,8 +18,9 @@ domains
   value = number(integer); bool(boolean).
   operator = lbracket; rbracket; mult; divi; plus; minus;
               equal; greater; less; l_or; l_and; func(string).
-  command =  write; let; return; ifGoto(integer); goto(integer); label(integer). %РАЗБЕЙ НА РАЗНЫЕ ДОМЕНЫ
-  line = let(string Name, expression); write(expression); return(expression);
+  command =  write; let; return; read;
+            ifGoto(integer); goto(integer); label(integer). %РАЗБЕЙ НА РАЗНЫЕ ДОМЕНЫ
+  line = let(string Name, expression); write(expression); return(expression); read(string);
           ifGoto(expression, integer); goto(integer); label(integer).
   expression = token*.
 class predicates
@@ -72,6 +73,7 @@ clauses
   makeToken("write") = com(write) :- !.
   makeToken(":") = com(let) :- !.
   makeToken("return") = com(return) :- !.
+  makeToken("read") = com(read) :- !.
   makeToken("if") = rawIf :- !.
   makeToken("else") = rawElse :- !.
   makeToken("endif") = rawEndif :- !.
@@ -160,6 +162,9 @@ clauses
     split(1, Tokens, Left, Right),
     Left = [com(return)],
     getExpression(Right, [], Expression, Rest), !.
+  getLines(Tokens) = [read(Name)|getLines(Right)] :- %считывание значения
+    split(2, Tokens, Left, Right),
+    Left = [com(read), name(Name)], !.
   getLines(Tokens) = [ifGoto(Expression, LabelNumber)|getLines(Rest)] :- %if
     split(1, Tokens, Left, Right),
     Left = [com(ifGoto(LabelNumber))],
@@ -220,6 +225,8 @@ clauses
 
   %ВЫПОЛНЯЕМ ФУНКЦИЮ (список строк)
   exeFunc([let(Name, Expression) | Lines], FunName) = exeFunc(Lines, FunName) :-
+    var(Name, _, FunName),
+    exception::raise_user(write("Переменная ", Name, " уже сущестувет!"));
     assert(var(Name, calculate(Expression, [], FunName), FunName)), !.
   exeFunc([write(Expression) | Lines], FunName) = exeFunc(Lines, FunName) :-
     Res = calculate(Expression, [], FunName),
@@ -234,6 +241,16 @@ clauses
       exception::raise_user(write("Ошибка удаления переменной ", Param,
         " при выходе из контекста ", FunName))}),
     !.
+  exeFunc([read(Name) | Lines], FunName) = exeFunc(Lines, FunName) :-
+    var(Name, _, FunName),
+    exception::raise_user(write("Переменная ", Name, " уже сущестувет!"));
+    Val = console::readLine(),
+    (
+      V = number(tryToTerm(Val)), !;
+      V = bool(tryToTerm(Val)), !;
+      exception::raise_user(write("Не удалось привести значение ", Val, " к поддерживаемому типу!"))
+    ),
+    assert(var(Name, V, FunName)), !.
   exeFunc([ifGoto(Expression, LabelNumber) | Lines], FunName) = exeFunc(Rest, FunName) :-
     Res = calculate(Expression, [], FunName),
     (
@@ -283,7 +300,7 @@ clauses
   operation(func(FunName),Values) = exeFunc(Lines, FunName) :-
     fun(FunName, Lines, Params),
     Tuples = zip(Params, Values),
-    forAll(Tuples,{(tuple(ParamName, Val)) :- assert(var(ParamName, Val, FunName))}),
+    forAll(Tuples,{(tuple(ParamName, Val)) :- asserta(var(ParamName, Val, FunName))}),
     !.
   operation(Op,Vals) = _ :-
     exception::raise_user(write(

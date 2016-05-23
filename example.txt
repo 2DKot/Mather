@@ -22,6 +22,9 @@ fun main:
 
   write max(5, 7)
   write max(8, 4)
+
+  read n
+  write fac(n)
   return 0
 
 fun myFunction a b:
@@ -33,4 +36,11 @@ fun max a b:
     return a
   else
     return b
+  endif
+
+fun fac n:
+  if n = 0
+    return 1
+  else
+    return n*fac(n-1)
   endif
