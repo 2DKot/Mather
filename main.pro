@@ -13,9 +13,10 @@ implement main
   open core, console, string, list
 
 domains
-  token = val(value); op(operator); com(command); name(string); fun; comma;
+  token = val(value); op(operator); com(command); name(string); dquote;
+          fun; comma;
           rawIf; rawElse; rawEndif.
-  value = number(integer); bool(boolean).
+  value = number(integer); bool(boolean); str(string).
   operator = lbracket; rbracket; mult; divi; plus; minus;
               equal; greater; less; l_or; l_and; func(string).
   command =  write; let; return; read;
@@ -28,6 +29,7 @@ class predicates
 
   scanner:(string) -> token*.
   makeToken:(string) -> token.
+  correctStrings:(token*, token*) -> token*.
   correctFunCalls:(token*, token*) -> token*.
   correctParams:(token*, token*) -> token*.
   getCallParams:(token*, token*, token*[out], token*[out], integer).
@@ -70,6 +72,7 @@ clauses
   makeToken("|") = op(l_or) :- !.
   makeToken("&") = op(l_and) :- !.
   makeToken(",") = comma :- !.
+  makeToken("\"") = dquote :- !.
   makeToken("write") = com(write) :- !.
   makeToken(":") = com(let) :- !.
   makeToken("return") = com(return) :- !.
@@ -83,6 +86,12 @@ clauses
   makeToken(S) = val(number(Num)) :- Num = tryToTerm(S), !.
   makeToken(S) = name(S) :- isName(S), !.
   makeToken(S) = _ :- exception::raise_user(write("Неизвестный токен ", S)).
+
+  correctStrings([], NewTokens) = reverse(NewTokens) :- !.
+  correctStrings(Tokens, NewTokens) = correctStrings(Right, [val(str(S))|NewTokens]) :-
+    split(3, Tokens, Left, Right),
+    Left = [dquote, name(S), dquote], !.
+  correctStrings([T|Tokens], NewTokens) = correctStrings(Tokens, [T|NewTokens]) :- !.
 
   correctFunCalls([], NewTokens) = reverse(NewTokens) :- !.
   correctFunCalls(RawTokens, NewTokens) =
@@ -273,6 +282,7 @@ clauses
 
   writeValue(number(V)) :- write(V), nl, !.
   writeValue(bool(V)) :- write(V), nl, !.
+  writeValue(str(V)) :- write(V), nl, !.
 
   %ВЫЧИСЛИТЕЛЬ
   %просто число ложим на стек
@@ -319,10 +329,13 @@ clauses
   arity(Op) = _ :- exception::raise_user(write("Неверное использование оператора ", Op, ".")).
 
   run() :-
+
     Source = file::readString("program.txt"),
     RawTokens = scanner(Source),
-    %write(RawTokens), nl,
-    CorrectedCalls = correctFunCalls(RawTokens, []),
+    write(RawTokens), nl,
+    CorrectedStrings = correctStrings(RawTokens, []),
+    write("Исправленные строковые литералы: \n", CorrectedStrings),
+    CorrectedCalls = correctFunCalls(CorrectedStrings, []),
     %write("Исправленные вызовы: \n", CorrectedTokens),
     CorrectedIfs = correctIfs(CorrectedCalls, [], 0, []),
     %write("Исправленные ифы: \n", CorrectedIfs),

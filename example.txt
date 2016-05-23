@@ -25,6 +25,10 @@ fun main:
 
   read n
   write fac(n)
+
+  read t
+  write checkTime(t)
+
   return 0
 
 fun myFunction a b:
@@ -44,3 +48,14 @@ fun fac n:
   else
     return n*fac(n-1)
   endif
+
+fun checkTime n:
+  if n < 8 
+    return "Why_you_are_not_sleeping"
+  else if n < 10
+    return "Havent_you_stand_up_yet"
+  else if n < 18
+    return "Do_something_important"
+  else if n < 22
+    return "Do_something_cool"
+  else return "Sleep"
